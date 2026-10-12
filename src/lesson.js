@@ -32,8 +32,8 @@ for(let i=1;i<route.length-1;i++){const p=route[i],back=route[i-1].clone().sub(p
 points.push(route[route.length-1].clone());const left=[],right=[];
 for(let i=0;i<points.length;i++){const before=points[i].clone().sub(points[Math.max(0,i-1)]),after=points[Math.min(i+1,points.length-1)].clone().sub(points[i]);if(before.lengthSq()<1e-12)before.copy(after);if(after.lengthSq()<1e-12)after.copy(before);before.normalize();after.normalize();const n0=new THREE.Vector2(-before.y,before.x),n1=new THREE.Vector2(-after.y,after.x),n=n0.clone().add(n1).normalize(),offset=n.multiplyScalar(width/2/Math.max(.1,n.dot(n0)));left.push(points[i].clone().add(offset));right.push(points[i].clone().sub(offset));}
 const shape=new THREE.Shape(),outline=[...left,...right.reverse()];shape.moveTo(-outline[0].x,outline[0].y);for(let i=1;i<outline.length;i++)shape.lineTo(-outline[i].x,outline[i].y);shape.closePath();return shape;}
-const band=roundedStrip([[ZF,NECK],[Z+.32,NECK],[Z,NECK+.32],[Z,R],[-Z,R],[-Z,-R],[Z,-R],[Z,-NECK-.32],[Z+.32,-NECK],[ZF,-NECK]].map(([z,y])=>new THREE.Vector2(z,y)),.20);
-const bandGeometry=new THREE.ExtrudeGeometry(band,{depth:.09,bevelEnabled:true,bevelThickness:.012,bevelSize:.012,bevelSegments:2,curveSegments:10});bandGeometry.translate(0,0,-.045);bandGeometry.rotateY(Math.PI/2);const coilMesh=new THREE.Mesh(bandGeometry,copper);rotor.add(coilMesh);
+function coilBandGeometry(front=ZF){const band=roundedStrip([[front,NECK],[Z+.32,NECK],[Z,NECK+.32],[Z,R],[-Z,R],[-Z,-R],[Z,-R],[Z,-NECK-.32],[Z+.32,-NECK],[front,-NECK]].map(([z,y])=>new THREE.Vector2(z,y)),.20);const geometry=new THREE.ExtrudeGeometry(band,{depth:.09,bevelEnabled:true,bevelThickness:.012,bevelSize:.012,bevelSegments:2,curveSegments:10});geometry.translate(0,0,-.045);geometry.rotateY(Math.PI/2);return geometry;}
+const bandGeometry=coilBandGeometry(),coilMesh=new THREE.Mesh(bandGeometry,copper);rotor.add(coilMesh);
 const litCopper=copper.clone();litCopper.color.set('#70f5e5');litCopper.emissive.set('#18a899');litCopper.emissiveIntensity=.85;
 const axisGeometry=new THREE.BufferGeometry().setFromPoints([V(0,0,-2.45),V(0,0,2.55)]);const axis=new THREE.Line(axisGeometry,new THREE.LineDashedMaterial({color:0x8e9da8,dashSize:.16,gapSize:.13}));axis.computeLineDistances();model.add(axis);
 [['a',R,Z],['b',R,-Z],['c',-R,-Z],['d',-R,Z]].forEach(([t,y,z])=>label(t,V(0,y+(y>0?.25:-.25),z),'#edf3f7',.45,rotor));
@@ -74,16 +74,21 @@ const wireMat=mat('#b89455',.2);pipe([plus,V(3.95,-2.06,4.15),V(1.1,-2.27,4.55),
 // A split ring, not two slip rings. Its two insulating gaps meet the brushes
 // exactly when the coil crosses the neutral plane (theta = n*pi).
 const commutatorRotor=new THREE.Group(),brushes=new THREE.Group();rotor.add(commutatorRotor);model.add(brushes);
-const COMM_RADIUS=NECK,COMM_Z=ZF+.20,COMM_DEPTH=.40,COMM_GAP=.18,BRUSH_WIDTH=.03;
+const COMM_RADIUS=.39,COMM_INNER=.335,COMM_Z=ZF+.20,COMM_DEPTH=.40,COMM_GAP=.18,BRUSH_WIDTH=.03;
 const COMM_DEAD=COMM_GAP/2-Math.asin(BRUSH_WIDTH/(2*COMM_RADIUS));
-const core=new THREE.Mesh(new THREE.CylinderGeometry(COMM_RADIUS-.055,COMM_RADIUS-.055,COMM_DEPTH+.025,40),mat('#222830'));core.rotation.x=Math.PI/2;core.position.z=COMM_Z;commutatorRotor.add(core);
-function halfRing(start){const end=start+Math.PI-COMM_GAP,inner=COMM_RADIUS-.055,s=new THREE.Shape();s.absarc(0,0,COMM_RADIUS,start,end,false);s.lineTo(inner*Math.cos(end),inner*Math.sin(end));s.absarc(0,0,inner,end,start,true);s.closePath();const g=new THREE.ExtrudeGeometry(s,{depth:COMM_DEPTH,bevelEnabled:false,curveSegments:48});g.translate(0,0,COMM_Z-COMM_DEPTH/2);const m=new THREE.Mesh(g,mat('#d99854',.72));commutatorRotor.add(m);return m;}
+// Hollow split-ring: the conductor enters its bore and touches the inner
+// wall. Small insulating gap pieces hold the two conducting halves apart.
+function ringPart(start,end,material){const inner=COMM_INNER,s=new THREE.Shape();s.absarc(0,0,COMM_RADIUS,start,end,false);s.lineTo(inner*Math.cos(end),inner*Math.sin(end));s.absarc(0,0,inner,end,start,true);s.closePath();const g=new THREE.ExtrudeGeometry(s,{depth:COMM_DEPTH,bevelEnabled:false,curveSegments:48});g.translate(0,0,COMM_Z-COMM_DEPTH/2);const m=new THREE.Mesh(g,material);commutatorRotor.add(m);return m;}
+function halfRing(start){return ringPart(start,start+Math.PI-COMM_GAP,mat('#d99854',.72));}
 halfRing(COMM_GAP/2);halfRing(Math.PI+COMM_GAP/2);
-// Silver coil tabs directly meet the rear face of their own copper half.
-// Upper/lower halves contact y=+/-NECK; insulating gaps are at +/-x.
-// Brushes are fixed on the left/right and meet these gaps at theta=n*pi.
+const ringInsulator=mat('#252b34');ringPart(-COMM_GAP/2,COMM_GAP/2,ringInsulator);ringPart(Math.PI-COMM_GAP/2,Math.PI+COMM_GAP/2,ringInsulator);
+const commutatorCoilGeometry=coilBandGeometry(COMM_Z+.08);
+// The original y=+/-NECK silver tabs extend inside the bore. Their broad
+// outer edges touch the upper/lower copper inner walls; no intermediate wire.
+// Brushes remain fixed on +/-x and meet the insulating gaps at theta=n*pi.
 const brushPositive=V(-COMM_RADIUS-.18,0,COMM_Z),brushNegative=V(COMM_RADIUS+.18,0,COMM_Z);
 for(const side of [-1,1]){box(.13,BRUSH_WIDTH,.20,mat('#31363e'),V(side*(COMM_RADIUS+.06),0,COMM_Z),brushes);box(.085,.08,.24,contactMetal,V(side*(COMM_RADIUS+.155),0,COMM_Z),brushes);}
+for(const side of [-1,1]){label('电刷',V(side*(COMM_RADIUS+.65),-.24,COMM_Z+.10),'#f4d49c',.55,brushes);const guide=new THREE.Line(new THREE.BufferGeometry().setFromPoints([V(side*(COMM_RADIUS+.07),0,COMM_Z),V(side*(COMM_RADIUS+.36),-.18,COMM_Z+.10)]),new THREE.LineBasicMaterial({color:0xb6c5d0,transparent:true,opacity:.85,depthTest:false}));brushes.add(guide);}
 let leads=[];
 const WIRE_BREAK_SECONDS=10,breakMarkers=new THREE.Group();model.add(breakMarkers);breakMarkers.visible=false;const breakTipMaterial=mat('#ffb071',.65),breakTips=[-1,1].map(()=>{const tip=new THREE.Mesh(new THREE.SphereGeometry(.045,12,8),breakTipMaterial);breakMarkers.add(tip);return tip;});const breakLabel=label('导线断裂',V(-.65,-.45,2.35),'#ff8879',.85,breakMarkers);
 const state={theta:-65*Math.PI/180,omega:0,running:false,hasStarted:false,closed:false,time:0,commutator:false,halfPower:false,wireBroken:false,breakTheta:null,breakAt:null,twistTime:0,wireReference:-65*Math.PI/180};
@@ -102,7 +107,7 @@ function brokenLead(start,via,side){const fixed=windingPoints(side,state.breakTh
 for(let i=0;i<cut;i++){const u=i/(cut-1),p=fixed[i],hanging=V(p.x+swing,-.85-1.18*Math.pow(u,1.3)+p.y,2.92-.45*(1-(1-u)**2));points.push(p.clone().lerp(hanging,drop));}
 const released=fixed[cut-1].clone().add(V(side*.18,-.35,.16));let tipIndex=0;for(const [x,y] of [[side*.10,-2.04],[side*.10,-2.10],[side*.10,-2.18]]){const target=V(x+swing,y,2.47);points.push(fixed[cut-1].clone().lerp(released,++tipIndex/3).lerp(target,drop));}
 const entry=new THREE.CatmullRomCurve3([start,...via,points[0]]).getPoints(32),path=[...entry.slice(0,-1),...points],mesh=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(path),Math.max(96,path.length*2),.032,8,false),wireMat);model.add(mesh);breakTips[side>0?0:1].position.copy(points[points.length-1]);return mesh;}
-function updateWires(){for(const p of leads){model.remove(p);p.geometry.dispose();}commutatorRotor.visible=brushes.visible=state.commutator;breakMarkers.visible=state.wireBroken&&!state.commutator;
+function updateWires(){coilMesh.geometry=state.commutator?commutatorCoilGeometry:bandGeometry;for(const p of leads){model.remove(p);p.geometry.dispose();}commutatorRotor.visible=brushes.visible=state.commutator;breakMarkers.visible=state.wireBroken&&!state.commutator;
 const positiveVia=[V(-1.06,-1.96,3.5),V(-.8,-.9,3.1)],negativeVia=[V(2.3,-1.9,3.7),V(1.1,-1.4,3.15)];
 leads=state.commutator?[pipe([switchWireB,V(-1.06,-1.96,3.5),V(-.7,-1.0,2.65),brushPositive],.032,wireMat,model,true),pipe([minus,V(2.3,-1.9,3.7),V(.9,-.2,2.7),brushNegative],.032,wireMat,model,true)]:state.wireBroken?[brokenLead(switchWireB,positiveVia,1),brokenLead(minus,negativeVia,-1)]:[woundLead(switchWireB,positiveVia,1),woundLead(minus,negativeVia,-1)];
 if(breakMarkers.visible){const top=Math.max(...leads.map(p=>{p.geometry.computeBoundingBox();return p.geometry.boundingBox.max.y;}));breakLabel.position.copy(breakTips[0].position).add(breakTips[1].position).multiplyScalar(.5);breakLabel.position.y=top+.30;breakLabel.position.z+=.10;}}
@@ -134,7 +139,7 @@ let txt,desc;if(state.wireBroken&&!state.commutator){txt=moving?'导线断裂 ·
 $('halfPower').checked=state.halfPower;$('commutator').checked=state.commutator;$('returnTitle').textContent=state.commutator||state.halfPower?'越过后为什么继续转动？':'越过后为什么返回？';$('returnDesc').textContent=state.commutator?'换向器使电流每半圈反向，ab、cd两边的力随之反向，转动作用继续沿顺时针方向。固定电刷供电，外部引线不缠绕。':(state.halfPower?'越过中性面后自动断电，线圈靠惯性转过半圈，再接通原方向电流。转动作用继续同向；柔性引线会逐渐缠绕。':'电流没有换向，两边受力方向保持不变，但转动作用反向。线圈先减速，再反向返回。');$('modelNotice').textContent='模型说明：均匀磁场、理想转轴；通电时电流大小恒定。引线缠绕只作结构演示，不计算其弹力和受力；未模拟反电动势。'+(state.commutator||state.halfPower?'持续转动中，开启摩擦和空气阻力可观察阻力对转速的影响。':'开启摩擦和空气阻力时，线圈摆动逐渐减弱；关闭时，观察忽略这些阻力的理想运动。');$('neutralTitle').textContent=state.commutator||state.halfPower?'中性面处靠惯性越过':'平衡不等于没有力';$('neutralDesc').textContent=state.commutator?'电刷经过绝缘缝时短暂断电，线圈靠惯性越过中性面。若恰好静止在该位置，则不能自行启动。':(state.halfPower?'到达中性面后开始断电，电流与磁场力消失。线圈靠惯性越过，断电半圈后再通电。':'此时两边仍然受力，但力的作用线通过转轴，不能使线圈转动。已有的运动不会瞬间停止。');$('forceNote').textContent=state.commutator?'粉色：ab、cd 的磁场力。通电时大小恒定，换向时方向反转；绝缘缝处暂时为零。':(state.halfPower?'粉色：ab、cd 的磁场力。通电时等长反向，断电半圈时为零。':'粉色：ab、cd 的磁场力，大小保持不变。');
 if(state.wireBroken&&!state.commutator){$('returnTitle').textContent='导线断裂后为什么停止？';$('returnDesc').textContent='导线断裂使电路断开，线圈不再受到推动转动的磁场力。它先靠惯性继续转动，再受到转轴处的残余阻力，逐渐停止。';$('windingStatus').textContent='导线已断裂 · 点击复位修复';$('forceNote').textContent='电路已断开：无电流、无磁场力、无高亮。';$('modelNotice').textContent='断裂为教学示意：导线持续绞合10秒后触发，播放倍率影响演示计时；实际断裂限度与线材有关。断裂演示中保留转轴阻力，近似演示缓慢停止。';}
 document.querySelectorAll('[data-preset]').forEach(b=>b.classList.toggle('active',Math.abs(deg-Number(b.dataset.preset))<1));drawProjection();}
-function drawProjection(){let c=$('projection'),w=c.clientWidth,h=c.clientHeight,d=devicePixelRatio;c.width=w*d;c.height=h*d;let x=c.getContext('2d');x.scale(d,d);const cx=w/2,cy=h/2,r=42;
+function drawProjection(){let c=$('projection'),w=c.clientWidth,h=c.clientHeight,d=devicePixelRatio;c.width=w*d;c.height=h*d;let x=c.getContext('2d'),uiScale=h/150;x.scale(d*uiScale,d*uiScale);w/=uiScale;h=150;const cx=w/2,cy=h/2,r=42;
 x.font='12px Microsoft YaHei';x.textAlign='center';x.fillStyle='#216e98';x.fillRect(12,38,30,75);x.fillStyle='#fff';x.fillText('S',27,80);x.fillStyle='#d76146';x.fillRect(w-42,38,30,75);x.fillStyle='#fff';x.fillText('N',w-27,80);
 function arr(ax,ay,bx,by,color){x.strokeStyle=color;x.fillStyle=color;x.lineWidth=2;x.beginPath();x.moveTo(ax,ay);x.lineTo(bx,by);x.stroke();const t=Math.atan2(by-ay,bx-ax);x.beginPath();x.moveTo(bx,by);x.lineTo(bx-7*Math.cos(t-.5),by-7*Math.sin(t-.5));x.lineTo(bx-7*Math.cos(t+.5),by-7*Math.sin(t+.5));x.closePath();x.fill();}
 if($('field').checked)arr(w-49,22,49,22,'#2599b0');x.setLineDash([4,4]);x.strokeStyle='#adc5ca';x.beginPath();x.moveTo(cx,10);x.lineTo(cx,h-10);x.stroke();x.setLineDash([]);
@@ -146,12 +151,13 @@ function toggleSwitch(){state.closed=!state.closed;leverUpdate();sync();}
 function stop(){state.running=false;state.omega=0;}
 document.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{stop();state.theta=Number(b.dataset.preset)*Math.PI/180;if(!state.wireBroken){state.wireReference=state.theta;state.twistTime=0;}updateWires();sync();});
 $('angle').oninput=()=>{stop();state.theta=Number($('angle').value)*Math.PI/180;updateWires();sync();};
+function coilSpeedFactor(){return Number($('speed').value)*.5;}
 $('speed').oninput=()=>{$('speedText').textContent=Number($('speed').value).toFixed(1)+'×';};
 $('switch').onclick=toggleSwitch;
 function resetExperiment(){Object.assign(state,{theta:-65*Math.PI/180,omega:0,running:false,hasStarted:false,closed:false,time:0,wireBroken:false,breakTheta:null,breakAt:null,twistTime:0,wireReference:-65*Math.PI/180});model.position.set(0,0,0);pan.set(0,-.2,.3);setCamera('oblique');leverUpdate();updateWires();sync();}
 $('play').onclick=()=>{if(state.running){state.running=false;sync();return;}if(!state.hasStarted){resetExperiment();state.closed=true;state.hasStarted=true;leverUpdate();}state.running=true;sync();};
 $('reset').onclick=resetExperiment;
-$('step').onclick=()=>{state.running=false;state.hasStarted=true;state.closed=true;leverUpdate();tick(.08*Number($('speed').value));updateWires();sync();};
+$('step').onclick=()=>{state.running=false;state.hasStarted=true;state.closed=true;leverUpdate();tick(.08*coilSpeedFactor());updateWires();sync();};
 for(const id of ['forces','current','field','neutral','resistance','highlight'])$(id).onchange=sync;
 function selectContinuousMode(mode){const hadCommutator=state.commutator;state.halfPower=mode==='half';state.commutator=mode==='commutator';if(hadCommutator!==state.commutator){state.wireReference=state.theta;state.wireBroken=false;state.breakTheta=null;state.breakAt=null;state.twistTime=0;}updateWires();sync();}
 $('halfPower').onchange=()=>selectContinuousMode($('halfPower').checked?'half':'none');
@@ -162,7 +168,7 @@ document.querySelectorAll('[data-qr]').forEach(button=>button.onclick=()=>{$('qr
 $('closeQr').onclick=()=>$('qrDialog').close();
 $('qrDialog').addEventListener('click',e=>{if(e.target!==$('qrDialog'))return;const r=$('qrDialog').getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)$('qrDialog').close();});
 let last=performance.now(),wireTime=0;
-function frame(now){let dt=Math.min((now-last)/1000,.05);last=now;if(state.running){tick(dt*Number($('speed').value));wireTime+=dt;if(wireTime>.035){if(!state.commutator)updateWires();wireTime=0;}sync();}if($('autorotate').checked)yaw+=dt*.15;updateCamera();renderer.render(scene,camera);requestAnimationFrame(frame);}
+function frame(now){let dt=Math.min((now-last)/1000,.05);last=now;if(state.running){tick(dt*coilSpeedFactor());wireTime+=dt;if(wireTime>.035){if(!state.commutator)updateWires();wireTime=0;}sync();}if($('autorotate').checked)yaw+=dt*.15;updateCamera();renderer.render(scene,camera);requestAnimationFrame(frame);}
 leverUpdate();updateWires();fit();sync();requestAnimationFrame(frame);
 // Read-only diagnostics for browser QA; physics uses the same integrator as the animation.
 window.lesson={state,tick,sync,renderer,camera,model,pointers,currentSign,commutatorRotor,brushes,leads:()=>leads,get gesture(){return gesture;},get distance(){return distance;},get yaw(){return yaw;}};
