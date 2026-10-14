@@ -19,6 +19,7 @@ const g=new THREE.ExtrudeGeometry(s,{depth:2.0,bevelEnabled:true,bevelSize:.025,
 const sm=pole(-1,'#197fa8'),nm=pole(1,'#d85840');
 surfaceLabel('S',V(-.22,.10,1.03),.65,.50,sm);surfaceLabel('N',V(.22,.10,1.03),.65,.50,nm);
 surfaceLabel('张专注物理',V(-.02,-1.72,1.032),1.22,.38,sm);surfaceLabel('张专注物理',V(.02,-1.72,1.032),1.22,.38,nm);
+const statorLabels=[sm,nm].map(magnet=>label('定子',V(0,1.12,1.08),'#ffffff',.65,magnet));
 const floor=new THREE.GridHelper(200,200,0x294047,0x122329);floor.position.y=GROUND_Y;scene.add(floor);
 // The neutral plane is fixed in the yz plane: its normal is parallel to B.
 // It follows whole-model panning but does not turn with the coil.
@@ -38,6 +39,7 @@ points.push(route[route.length-1].clone());return points;
 function coilRoute(front=ZF,contact=NECK){const entry=contact===NECK?NECK:.105,tip=contact===NECK?[[front,entry]]:[[front,contact],[front-.08,contact],[ZF+.015,entry]],route=[...tip,[Z+.32,entry],[Z,entry+.32],[Z,R],[-Z,R],[-Z,-R],[Z,-R],[Z,-entry-.32],[Z+.32,-entry],...tip.map(([z,y])=>[z,-y]).reverse()];return route.map(([z,y])=>new THREE.Vector2(z,y));}
 function coilBandGeometry(front=ZF,contact=NECK){const band=roundedStrip(coilRoute(front,contact),COIL_WIDTH),geometry=new THREE.ExtrudeGeometry(band,{depth:COIL_DEPTH,bevelEnabled:true,bevelThickness:COIL_BEVEL,bevelSize:COIL_BEVEL,bevelSegments:2,curveSegments:10});geometry.translate(0,0,-COIL_DEPTH/2);geometry.rotateY(Math.PI/2);return geometry;}
 const bandGeometry=coilBandGeometry(),coilMesh=new THREE.Mesh(bandGeometry,copper);rotor.add(coilMesh);
+const rotorLabel=label('转子',V(0,R+.60,-.55),'#eef4ff',.68,rotor);const rotorGuide=new THREE.Line(new THREE.BufferGeometry().setFromPoints([V(0,R+.40,-.55),V(0,R,-.55)]),new THREE.LineBasicMaterial({color:0xeef4ff,transparent:true,opacity:.85,depthTest:false}));rotor.add(rotorGuide);
 const axisGeometry=new THREE.BufferGeometry().setFromPoints([V(0,0,-2.45),V(0,0,2.55)]);const axis=new THREE.Line(axisGeometry,new THREE.LineDashedMaterial({color:0x8e9da8,dashSize:.16,gapSize:.13}));axis.computeLineDistances();model.add(axis);
 [['a',R,Z],['b',R,-Z],['c',-R,-Z],['d',-R,Z]].forEach(([t,y,z])=>label(t,V(0,y+(y>0?.25:-.25),z),'#edf3f7',.45,rotor));
 const currentGroup=new THREE.Group(),currentForward=new THREE.Group(),currentReverse=new THREE.Group();currentGroup.add(currentForward,currentReverse);rotor.add(currentGroup);const forces=new THREE.Group();model.add(forces);const field=new THREE.Group();model.add(field);
@@ -93,8 +95,8 @@ const COMM_DEAD=COMM_GAP/2-Math.asin(BRUSH_WIDTH/(2*COMM_RADIUS));
 // Hollow split-ring: the conductor enters its bore and touches the inner
 // wall. Small insulating gap pieces hold the two conducting halves apart.
 function ringPart(start,end,material){const inner=COMM_INNER,s=new THREE.Shape();s.absarc(0,0,COMM_RADIUS,start,end,false);s.lineTo(inner*Math.cos(end),inner*Math.sin(end));s.absarc(0,0,inner,end,start,true);s.closePath();const g=new THREE.ExtrudeGeometry(s,{depth:COMM_DEPTH,bevelEnabled:false,curveSegments:48});g.translate(0,0,COMM_Z-COMM_DEPTH/2);const m=new THREE.Mesh(g,material);commutatorRotor.add(m);return m;}
-function halfRing(start){return ringPart(start,start+Math.PI-COMM_GAP,mat('#d99854',.72));}
-halfRing(COMM_GAP/2);halfRing(Math.PI+COMM_GAP/2);
+function halfRing(start,color){return ringPart(start,start+Math.PI-COMM_GAP,mat(color,.72));}
+halfRing(COMM_GAP/2,'#f29b38');halfRing(Math.PI+COMM_GAP/2,'#9872e8');
 const ringInsulator=mat('#252b34');ringPart(-COMM_GAP/2,COMM_GAP/2,ringInsulator);ringPart(Math.PI-COMM_GAP/2,Math.PI+COMM_GAP/2,ringInsulator);
 const commutatorCoilGeometry=coilBandGeometry(COMM_Z-.03,COMM_INNER);
 // Thin silver leads first enter the bore near the axis, then bend outward
@@ -154,7 +156,7 @@ function updateTwistTimer(dt){if(state.commutator||state.wireBroken||!Number.isF
 function integrate(dt){checkWireBreak();const k=3.2*currentSign(),c=($('resistance').checked?.38:0)+(state.wireBroken&&!state.commutator?1.15:0);state.omega+=(-k*Math.sin(state.theta)-c*state.omega)*dt;if(state.wireBroken&&!state.commutator&&Math.abs(state.omega)<.018){state.omega=0;state.running=false;}state.theta+=state.omega*dt;state.time+=dt;updateTwistTimer(dt);}
 function tick(dt){let remaining=dt;while(remaining>0){let d=Math.min(1/240,.012/Math.max(1,Math.abs(state.omega)),remaining);integrate(d);remaining-=d;}}
 function sync(){checkWireBreak();leverUpdate();rotor.rotation.z=-state.theta;const sign=currentSign(),p=endpoint(R,.25),q=endpoint(-R,.25);fa.position.copy(p);fc.position.copy(q);fa.setDirection(V(0,sign||1,0));fc.setDirection(V(0,-(sign||1),0));fla.position.copy(p).add(V(.22,(sign||1)*.65,0));flc.position.copy(q).add(V(.22,-(sign||1)*.65,0));forces.visible=!!sign&&$('forces').checked;
-currentGroup.visible=!!sign&&$('current').checked;updateCurrentFlow(sign,currentGroup.visible);currentForward.visible=sign>0;currentReverse.visible=sign<0;field.visible=$('field').checked;floor.visible=true;neutralPlane.visible=$('neutral').checked;
+currentGroup.visible=!!sign&&$('current').checked;updateCurrentFlow(sign,currentGroup.visible);currentForward.visible=sign>0;currentReverse.visible=sign<0;field.visible=$('field').checked;floor.visible=true;neutralPlane.visible=$('neutral').checked;const partsVisible=$('parts').checked;statorLabels.forEach(label=>label.visible=partsVisible);rotorLabel.visible=rotorGuide.visible=partsVisible;
 let deg=((state.theta*180/Math.PI+180)%360+360)%360-180;if(Math.abs(deg+180)<1e-8&&state.theta>0)deg=180;$('angle').value=deg;$('angleText').textContent=(Math.abs(deg)<.05?'0':deg.toFixed(0))+'°';$('switchLabel').textContent=state.halfPower&&!state.commutator?'自动开关':'开关';$('switch').textContent=state.wireBroken&&!state.commutator?(state.closed?'闭合 · 导线断裂':'断开 · 导线断裂'):state.closed?(sign?(state.halfPower&&!state.commutator?'自动闭合 · 有电流':'闭合 · 有电流'):(state.commutator?'闭合 · 换向间隙':'自动断开 · 无电流')):'断开 · 无电流';$('switch').classList.toggle('active',state.closed);$('play').textContent=state.running?'暂停演示':(state.hasStarted?'继续演示':'开始演示');
 $('supplyMode').textContent=state.commutator?'两半铜环＋电刷 · 每半圈换向':(state.halfPower?'柔性引线 · 半圈通电，半圈断电':'柔性引线供电 · 无换向器');$('modeBadge').textContent=state.commutator?'换向器演示 · 每半圈改变电流方向':(state.halfPower?'图示方案 · 断电半圈后再通电':'教材演示 · 不改变线圈电流方向');$('windingStatus').textContent=state.commutator?(!state.closed||sign?'换向器已接入 · 引线不随线圈缠绕':'换向器已接入 · 绝缘缝处短暂断电'):'柔性导线缠绕：'+((state.theta-state.wireReference)/(2*Math.PI)).toFixed(2)+' 圈'+(state.twistTime>0?' · 绞合 '+Math.min(state.twistTime,WIRE_BREAK_SECONDS).toFixed(1)+'/'+WIRE_BREAK_SECONDS+'秒':'');
 const moving=Math.abs(state.omega)>.025;$('motion').textContent=moving?(state.omega>0?'顺时针运动':'逆时针运动'):'静止';
@@ -182,7 +184,7 @@ function resetExperiment(){Object.assign(state,{theta:-65*Math.PI/180,omega:0,ru
 $('play').onclick=()=>{if(state.running){state.running=false;sync();return;}if(!state.hasStarted||state.wireBroken){resetExperiment();state.closed=true;state.hasStarted=true;leverUpdate();}selectPresetButton(null);state.running=true;sync();};
 $('reset').onclick=resetExperiment;
 $('step').onclick=()=>{selectPresetButton(null);state.running=false;state.hasStarted=true;state.closed=true;leverUpdate();tick(.08*coilSpeedFactor());updateWires();sync();};
-for(const id of ['forces','current','field','neutral','resistance'])$(id).onchange=sync;
+for(const id of ['forces','current','field','neutral','resistance','parts'])$(id).onchange=sync;
 function selectContinuousMode(mode){const hadCommutator=state.commutator;state.halfPower=mode==='half';if(state.halfPower){$('speed').value='0.5';$('speed').oninput();}state.commutator=mode==='commutator';if(state.commutator)$('current').checked=true;if(hadCommutator!==state.commutator){state.wireReference=state.theta;state.wireBroken=false;state.breakTheta=null;state.breakAt=null;state.twistTime=0;}updateWires();sync();}
 $('halfPower').onchange=()=>selectContinuousMode($('halfPower').checked?'half':'none');
 $('commutator').onchange=()=>selectContinuousMode($('commutator').checked?'commutator':'none');
